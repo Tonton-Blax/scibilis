@@ -1,0 +1,7 @@
+{"mcpServers":{
+    "svelte-llm": {
+			"type": "streamable-http",
+			"url": "https://svelte-llm.stanislav.garden/mcp/mcp",
+			"disabled": false
+		}
+}}

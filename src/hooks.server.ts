@@ -1,37 +1,40 @@
-import { sequence } from '@sveltejs/kit/hooks';
-import * as auth from '$lib/server/auth';
-import type { Handle } from '@sveltejs/kit';
-import { paraglideMiddleware } from '$lib/paraglide/server';
+import { migrateDatabase } from './lib/server/db/migrate';
+import { validateSessionToken, sessionCookieName } from './lib/server/auth';
+import { getUserByUsername } from './lib/server/user-service';
+import { createAdminUser } from './lib/server/create-admin-user';
 
-const handleParaglide: Handle = ({ event, resolve }) =>
-	paraglideMiddleware(event.request, ({ request, locale }) => {
-		event.request = request;
+// Run database migration on server start
+migrateDatabase().catch(console.error);
 
-		return resolve(event, {
-			transformPageChunk: ({ html }) => html.replace('%paraglide.lang%', locale)
-		});
-	});
+// Create admin user if it doesn't exist
+async function ensureAdminUser() {
+    try {
+        const adminUser = await getUserByUsername('admin');
+        if (!adminUser) {
+            console.log('Creating admin user...');
+            await createAdminUser();
+            console.log('Admin user created successfully');
+        } else {
+            console.log('Admin user already exists');
+        }
+    } catch (error) {
+        console.error('Error ensuring admin user exists:', error);
+    }
+}
 
-const handleAuth: Handle = async ({ event, resolve }) => {
-	const sessionToken = event.cookies.get(auth.sessionCookieName);
+// Run admin user creation on server start
+ensureAdminUser().catch(console.error);
 
-	if (!sessionToken) {
-		event.locals.user = null;
-		event.locals.session = null;
-		return resolve(event);
-	}
-
-	const { session, user } = await auth.validateSessionToken(sessionToken);
-
-	if (session) {
-		auth.setSessionTokenCookie(event, sessionToken, session.expiresAt);
-	} else {
-		auth.deleteSessionTokenCookie(event);
-	}
-
-	event.locals.user = user;
-	event.locals.session = session;
-	return resolve(event);
-};
-
-export const handle: Handle = sequence(handleParaglide, handleAuth);
+export async function handle({ event, resolve }) {
+    const sessionToken = event.cookies.get(sessionCookieName) || null;
+    
+    if (sessionToken) {
+        const { session, user } = await validateSessionToken(sessionToken);
+        if (session) {
+            event.locals.user = user;
+            event.locals.session = session;
+        }
+    }
+    
+    return resolve(event);
+}
