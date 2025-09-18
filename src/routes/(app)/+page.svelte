@@ -4,12 +4,13 @@
     import type { PageProps } from './$types';
 
     let { data }: PageProps = $props();
+    const { audioTracks = [], messages = [] } = data;
 </script>
 
 <div class="overflow-auto px-4 md:ml-64">
     <div class="rounded-lg border-2 border-dashed border-gray-200 p-4 dark:border-gray-700">
       <PlusPlaceholder colnum={1} rownum={1}>
-        <DropZone />    
+        <DropZone {audioTracks} {messages} />    
       </PlusPlaceholder>
       <!-- <PlusPlaceholder />
       <PlusPlaceholder colnum={2} rownum={2} />

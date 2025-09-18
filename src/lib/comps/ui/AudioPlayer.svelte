@@ -4,6 +4,7 @@
 	let time = $state(0);
 	let duration = $state(0);
 	let paused = $state(true);
+	let audioError = $state(false);
 
 	function format(time: number): string {
 		if (isNaN(time)) return '...';
@@ -13,9 +14,15 @@
 
 		return `${minutes}:${seconds < 10 ? `0${seconds}` : seconds}`;
 	}
+
+	// Handle audio errors
+	function handleAudioError() {
+		audioError = true;
+		console.error('Audio playback failed:', src);
+	}
 </script>
 
-<div class={['player', 'rounded-lg', { paused }]}>
+<div class={['player', 'rounded-lg', { paused, 'audio-error': audioError }]}>
 	<audio
 		{src}
 		bind:currentTime={time}
@@ -24,6 +31,7 @@
 		onended={() => {
 			time = 0;
 		}}
+		onerror={handleAudioError}
 	></audio>
 
 	<button
@@ -33,43 +41,49 @@
 	></button>
 
 	<div class="info">
-		<div class="description">
-			<strong>{title}</strong>
-			<!-- <span>{artist}</span> -->
-		</div>
-
-		<div class="time cursor-col-resize">
-			<span>{format(time)}</span>
-			<div
-				class="slider"
-				onpointerdown={e => {
-					const div = e.currentTarget;
-
-					function seek(e: PointerEvent) {
-						const { left, width } = div.getBoundingClientRect();
-
-						let p = (e.clientX - left) / width;
-						if (p < 0) p = 0;
-						if (p > 1) p = 1;
-
-						time = p * duration;
-					}
-
-					seek(e);
-
-					window.addEventListener('pointermove', seek);
-
-					window.addEventListener('pointerup', () => {
-						window.removeEventListener('pointermove', seek);
-					}, {
-						once: true
-					});
-				}}
-			>
-				<div class="progress" style="--progress: {time / duration}%"></div>
+		{#if audioError}
+			<div class="error-message">
+				<span>⚠️ Audio playback failed</span>
 			</div>
-			<span>{duration ? format(duration) : '--:--'}</span>
-		</div>
+		{:else}
+			<div class="description">
+				<strong>{title}</strong>
+				<!-- <span>{artist}</span> -->
+			</div>
+
+			<div class="time cursor-col-resize">
+				<span>{format(time)}</span>
+				<div
+					class="slider"
+					onpointerdown={e => {
+						const div = e.currentTarget;
+
+						function seek(e: PointerEvent) {
+							const { left, width } = div.getBoundingClientRect();
+
+							let p = (e.clientX - left) / width;
+							if (p < 0) p = 0;
+							if (p > 1) p = 1;
+
+							time = p * duration;
+						}
+
+						seek(e);
+
+						window.addEventListener('pointermove', seek);
+
+						window.addEventListener('pointerup', () => {
+							window.removeEventListener('pointermove', seek);
+						}, {
+							once: true
+						});
+					}}
+				>
+					<div class="progress" style="--progress: {time / duration}%"></div>
+				</div>
+				<span>{duration ? format(duration) : '--:--'}</span>
+			</div>
+		{/if}
 	</div>
 </div>
 
@@ -91,6 +105,11 @@
 	.player:not(.paused) {
 		color: var(--color-blue-200);
 		filter: drop-shadow(0.5em 0.5em 1em rgba(0,0,0,0.1));
+	}
+
+	.player.audio-error {
+		background: var(--color-red-500);
+		color: var(--color-gray-100);
 	}
 
 	button {
@@ -120,6 +139,13 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		line-height: 1.2;
+	}
+
+	.error-message {
+		color: var(--color-red-200);
+		font-size: 0.8em;
+		text-align: center;
+		padding: 0.5em;
 	}
 
 	.time {

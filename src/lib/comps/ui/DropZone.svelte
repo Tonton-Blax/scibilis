@@ -4,38 +4,10 @@
 	import { ffmpegMessage, toast } from "$lib/states.svelte";
 	import AudioPlayer from "./AudioPlayer.svelte";
 	import { CloseCircleOutline, PenNibOutline, VideoCameraSolid, ExclamationCircleSolid, DownloadOutline, ChevronDownOutline, NewspaperOutline, CheckOutline, ClipboardCleanSolid } from "flowbite-svelte-icons";
-	import { view } from "drizzle-orm/sqlite-core";
 	import { slide } from "svelte/transition";
-	// Removed import of remote function, will use API endpoint instead
-
-  // Interface for audio track items
-  interface AudioTrack {
-    id: string;
-    url: string;
-    title: string;
-    artist: string;
-    originalFile: File;
-    wasVideo: boolean;
-  }
-
-  // Interface for files that are dropped but not yet processed
-  interface PendingFile {
-    id: string;
-    file: File;
-    isProcessing: boolean;
-  }
-
   let filesInDropzone = <FileList | null>$state(null);
-  let audioTracks = $state<AudioTrack[]>([]);
   let pendingFiles = $state<PendingFile[]>([]);
-  
-  // Transcription state
-  interface TranscriptionResult { 
-    trackId: string;
-    content: string;
-    timestamp: string;
-  }
-  
+    
   let transcribingTracks = $state<Set<string>>(new Set());
   let transcriptionResults = $state<Map<string, TranscriptionResult>>(new Map());
   
@@ -43,29 +15,23 @@
   let showTranscriptionModal = $state(false);
   let currentTranscription = $state<TranscriptionResult | null>(null);
   
-  
+  let { audioTracks = [], messages }: { audioTracks: AudioTrack[]; messages: string[] } = $props();
+
+  $effect(()=>console.log(audioTracks));
+
   async function processFile(file: File): Promise<AudioTrack> {
     const isAudio = file.type.startsWith('audio/');
-    // revert to local-only extraction logic
-    const audioBlob = isAudio ? file : await extractAudio(file);
+    const audioBlob = isAudio
+      ? new Blob([file], { type: file.type }) // normalize to Blob
+      : await extractAudio(file);
 
-    // LOG: audio extracted
-    try {
-      console.log(`[DropZone] extracted audio for ${file.name}. blob size=${(audioBlob as Blob).size}`);
-    } catch (e) {
-      console.warn('[DropZone] failed to log extracted audio info', e);
-    }
-
-    // Create object URL for playback
     const url = URL.createObjectURL(audioBlob);
 
-    // Ensure ffmpeg UI state is cleared immediately after extraction so spinner doesn't stick
     try {
       ffmpegMessage.clear();
     } catch {}
 
-    // Set default title and artist from file name
-    const title = file.name.replace(/\.[^/.]+$/, ""); // Remove file extension
+    const title = file.name.replace(/\.[^/.]+$/, "");
     const artist = "Unknown Artist";
 
     const track: AudioTrack = {
@@ -228,9 +194,28 @@
     }
   }
   
-  function clearAllFiles() {
+  async function clearAllFiles() {
+    // Delete server-saved tracks from database first
+    const serverSavedTracks = audioTracks.filter(track => track.serverSaved);
+    let deleteErrors = 0;
+    
+    for (const track of serverSavedTracks) {
+      const success = await deleteTrackFromDatabase(track.id);
+      if (!success) {
+        deleteErrors++;
+      }
+    }
+    
+    if (deleteErrors > 0) {
+      toast.trigger(`Failed to delete ${deleteErrors} track(s) from server. Removed locally only.`, 'orange');
+    }
+    
     // Clear all tracks
-    audioTracks.forEach(track => URL.revokeObjectURL(track.url));
+    audioTracks.forEach(track => {
+      if (track.url) {
+        URL.revokeObjectURL(track.url);
+      }
+    });
     audioTracks = [];
     pendingFiles = [];
     transcribingTracks = new Set();
@@ -323,7 +308,9 @@
     
     // Create a temporary link to download the audio file
     const a = document.createElement('a');
-    a.href = track.url;
+    if (track.url) {
+      a.href = track.url;
+    }
     a.download = `${track.title}.mp3`;
     document.body.appendChild(a);
     a.click();
@@ -339,6 +326,32 @@
     if (result) {
       currentTranscription = result;
       showTranscriptionModal = true;
+    }
+  }
+  
+  async function deleteTrackFromDatabase(trackId: string) {
+    try {
+      const response = await fetch(`/api/tracks/${trackId}`, {
+        method: 'DELETE',
+        credentials: 'same-origin'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          console.log(`[DropZone] Track ${trackId} deleted from database`);
+          return true;
+        } else {
+          console.error(`[DropZone] Failed to delete track ${trackId}:`, data.error);
+          return false;
+        }
+      } else {
+        console.error(`[DropZone] Failed to delete track ${trackId}:`, response.status, response.statusText);
+        return false;
+      }
+    } catch (error) {
+      console.error(`[DropZone] Error deleting track ${trackId}:`, error);
+      return false;
     }
   }
 </script>
@@ -362,7 +375,7 @@
 </Dropzone>
 
 
-{#if filesInDropzone?.length}
+{#if filesInDropzone?.length || audioTracks.length > 0 || pendingFiles.length > 0}
   <div class="mt-4 w-full max-w-2xl">
     <!-- Display pending files (being processed) -->
     {#each pendingFiles as pendingFile (pendingFile.id)}
@@ -393,12 +406,30 @@
             <Spinner class="h-6 w-6 mr-2" />
             Transcription en cours...
           </Button>
+        {:else if track.url}
+          <AudioPlayer
+            src={track.url}
+            title={track.title}
+            artist={track.artist}
+          />
+        {:else if track.hasTranscription}
+          <!-- Placeholder for tracks with transcription but missing audio -->
+          <div class="flex items-center gap-x-2 bg-gray-100 dark:bg-gray-800 p-3 rounded-lg flex-1 w-[24rem] h-[3.75rem]">
+            <ExclamationCircleSolid class="h-6 w-6 text-yellow-500" />
+            <div class="flex-1">
+              <span class="text-sm font-medium">{track.title}</span>
+              <p class="text-xs text-gray-500 dark:text-gray-400">Audio file missing - transcription available</p>
+            </div>
+          </div>
         {:else}
-        <AudioPlayer
-          src={track.url}
-          title={track.title}
-          artist={track.artist}
-        />
+          <!-- Placeholder for tracks with missing audio and no transcription -->
+          <div class="flex items-center gap-x-2 bg-gray-100 dark:bg-gray-800 p-3 rounded-lg flex-1 w-[24rem] h-[3.75rem]">
+            <ExclamationCircleSolid class="h-6 w-6 text-red-500" />
+            <div class="flex-1">
+              <span class="text-sm font-medium">{track.title}</span>
+              <p class="text-xs text-gray-500 dark:text-gray-400">Audio file missing</p>
+            </div>
+          </div>
         {/if}
 
         <Button  color="green" class="h-[3.75rem] cursor-pointer relative">
@@ -412,9 +443,11 @@
         <Dropdown simple class="p-4">
           <DropdownItem
             onclick={() => {
-              fetch(track.url)
-                .then(response => response.blob())
-                .then(blob => handleTranscribe(track.id, blob, false));
+              if (track.url) {
+                fetch(track.url)
+                  .then(response => response.blob())
+                  .then(blob => handleTranscribe(track.id, blob, false));
+              }
             }}
             class="flex flex-row space-x-2 items-center w-full mx-auto cursor-pointer">
             <PenNibOutline class="shrink-0 h-8 w-8" />
@@ -422,9 +455,11 @@
           </DropdownItem>
           <DropdownItem
             onclick={() => {
-              fetch(track.url)
-                .then(response => response.blob())
-                .then(blob => handleTranscribe(track.id, blob, true));
+              if (track.url) {
+                fetch(track.url)
+                  .then(response => response.blob())
+                  .then(blob => handleTranscribe(track.id, blob, true));
+              }
             }}
             class="flex flex-row space-x-2 items-center w-full mx-auto cursor-pointer"
           >
@@ -459,9 +494,19 @@
 
 
         <Button color="red" class="h-[3.75rem]"
-          onclick={() => {
+          onclick={async () => {
+            // If track is saved on server, delete it from database first
+            if (track.serverSaved) {
+              const success = await deleteTrackFromDatabase(track.id);
+              if (!success) {
+                toast.trigger('Failed to delete track from server. Removed locally only.', 'orange');
+              }
+            }
+            
             // Remove this specific track
-            URL.revokeObjectURL(track.url);
+            if (track.url) {
+              URL.revokeObjectURL(track.url);
+            }
             audioTracks = audioTracks.filter(t => t.id !== track.id);
             
             // Also remove any transcription results for this track
