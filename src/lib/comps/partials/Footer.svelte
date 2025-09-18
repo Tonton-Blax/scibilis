@@ -3,8 +3,8 @@
   import { Footer, FooterCopyright, FooterLinkGroup, FooterLink, Tooltip } from "flowbite-svelte";
 </script>
 
-<Section divClass="max-w-none !px-0">
-  <Footer class="rounded-lg bg-white p-4 antialiased shadow sm:flex sm:items-center sm:justify-between sm:p-6 xl:p-8 dark:bg-gray-800">
+<Section divClass="fixed bottom-12 left-0 right-0 h-0 text-center">
+  <Footer class="inline-block text-left rounded-lg bg-white p-4 antialiased shadow sm:flex sm:items-center sm:justify-between sm:p-6 xl:p-8 dark:bg-gray-800">
     <FooterCopyright href="/" by="scibilis.com" year={2025} class="mb-4 text-center text-sm text-gray-500 sm:mb-0 dark:text-gray-400" />
     <FooterLinkGroup class="flex items-center justify-center space-x-1">
       <FooterLink href="/">
@@ -22,3 +22,4 @@
     </FooterLinkGroup>
   </Footer>
 </Section>
+

@@ -15,20 +15,24 @@ function buildFfmpegMessage() {
 function buildToast() {
     let show = $state(false);
     let message = $state('');
-    let timeout: NodeJS.Timeout;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     let color = $state<"red" | "primary" | "gray" | "orange" | "green">('primary');
 
-    function trigger(msg: string, color: 'blue' | 'red' | 'green' = 'blue', duration = 3000) {
+    // colorParam must match the color union above
+    function trigger(msg: string, colorParam: "red" | "primary" | "gray" | "orange" | "green" = 'primary', duration = 3000) {
         message = msg;
-        color = color;
+        color = colorParam;
         show = true;
-        clearTimeout(timeout);
+        if (timeout) clearTimeout(timeout);
         timeout = setTimeout(() => show = false, duration);
     }
 
     function close() {
         show = false;
-        clearTimeout(timeout);
+        if (timeout) {
+            clearTimeout(timeout);
+            timeout = undefined;
+        }
     }
 
     return {

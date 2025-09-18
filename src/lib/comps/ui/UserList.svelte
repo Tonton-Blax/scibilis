@@ -23,17 +23,19 @@
             userState.error = null;
             
             const offset = (page - 1) * limit;
-            const response = await fetch(`/api/users?limit=${limit}&offset=${offset}&search=${search}`);
+            const response = await fetch(`/api/users?limit=${limit}&offset=${offset}&search=${encodeURIComponent(search)}`);
             
             if (!response.ok) {
                 throw new Error('Failed to load users');
             }
             
             const data = await response.json();
-            userState.users = data;
+            // Accept either an array or an object with .users
+            userState.users = Array.isArray(data) ? data : (data.users ?? data);
         } catch (err) {
-            userState.error = err instanceof Error ? err.message : 'An unknown error occurred';
-            toast.trigger(userState.error, 'red');
+            const msg = err instanceof Error ? err.message : 'Unknown error loading users';
+            userState.error = msg;
+            toast.trigger(msg, 'red');
         } finally {
             userState.isLoading = false;
         }

@@ -26,21 +26,21 @@
             if (!response.ok) {
                 throw new Error('Failed to load user');
             }
-            
-            const user = await response.json();
+            const data = await response.json();
+            // populate form state with fetched data (keep fields expected by form)
             userFormState.formData = {
-                username: user.username,
-                email: user.email || '',
-                name: user.name || '',
+                username: data.username ?? '',
+                email: data.email ?? '',
+                name: data.name ?? '',
                 password: '',
                 confirmPassword: '',
-                role: user.role,
-                isActive: user.isActive,
-                bio: user.bio || ''
+                role: data.role ?? 'user',
+                isActive: data.isActive ?? true,
+                bio: data.bio ?? ''
             };
         } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : 'An unknown error occurred';
-            toast.trigger(errorMsg, 'red');
+            const msg = err instanceof Error ? err.message : 'Unknown error loading user';
+            toast.trigger(msg, 'red');
         }
     }
     

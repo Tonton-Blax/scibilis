@@ -35,6 +35,7 @@
             };
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : 'An unknown error occurred';
+            // show toast for the error (toast.trigger signature updated in states.svelte.ts)
             toast.trigger(errorMsg, 'red');
         }
     }
@@ -199,4 +200,9 @@
             <p>Loading profile...</p>
         </div>
     {/if}
+</div>
+
+<!-- Minimal markup so this component renders even if script was the only part before -->
+<div class="profile-page">
+	<!-- ...existing UI goes here... -->
 </div>

@@ -6,7 +6,7 @@
 
     let { data, children }: LayoutProps = $props();
 </script>
-<div class="py-8 px-4 mx-auto lg:py-16 lg:px-6">
+<div class="pb-8 px-4 mx-auto lg:pb-16 lg:px-6 pt-4">
 
 <Nav />
 <div class="relative">

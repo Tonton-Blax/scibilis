@@ -38,3 +38,8 @@
 		display: none;
 	}
 }
+
+.sidebar,
+.sidebar > div {
+	border-radius: 1rem !important;
+}

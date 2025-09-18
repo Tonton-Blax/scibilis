@@ -14,7 +14,16 @@
 </script>
 
 <SidebarButton onclick={demoSidebarUi.toggle} class="mb-2" />
-  <Sidebar {activeUrl} backdrop={false} isOpen={isDemoOpen} closeSidebar={closeDemoSidebar} params={{ x: -50, duration: 50 }} position="absolute" classes={{ nonactive: "p-2", active: "p-2" }} class="z-50 h-full">
+  <Sidebar 
+    {activeUrl} 
+    backdrop={false} 
+    isOpen={isDemoOpen} 
+    closeSidebar={closeDemoSidebar} 
+    params={{ x: -50, duration: 50 }} 
+    position="absolute" 
+    classes={{ nonactive: "p-2", active: "p-2" }} 
+    class="z-50 h-full sidebar"
+  >
     <SidebarGroup>
       <SidebarItem label="Dashboard">
         {#snippet icon()}
@@ -61,6 +70,4 @@
         {/snippet}
       </SidebarItem>
     </SidebarGroup>
-  </Sidebar>
-
-  
+  </Sidebar>  

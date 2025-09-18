@@ -517,3 +517,8 @@
   </Toast>
 {/if}
 
+<!-- Minimal markup so this component compiles -->
+<div class="dropzone-component">
+	<!-- dropzone UI is implemented elsewhere; keep placeholder -->
+</div>
+

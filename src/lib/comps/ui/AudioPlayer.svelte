@@ -34,8 +34,8 @@
 
 	<div class="info">
 		<div class="description">
-			<strong>{title}</strong> /
-			<span>{artist}</span>
+			<strong>{title}</strong>
+			<!-- <span>{artist}</span> -->
 		</div>
 
 		<div class="time cursor-col-resize">
