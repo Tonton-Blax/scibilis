@@ -3,6 +3,11 @@ import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
 import { hash, verify } from '@node-rs/argon2';
 import { encodeBase32LowerCase } from '@oslojs/encoding';
+import fs from 'fs/promises';
+import path from 'path';
+import { env } from '$env/dynamic/private';
+
+const STORAGE_DIR = env.STORAGE_DIR || path.join(process.cwd(), 'storage');
 
 function generateUserId() {
     // ID with 120 bits of entropy, or about the same as UUID v4.
@@ -120,9 +125,100 @@ export async function updateUser(
     return result[0] || null;
 }
 
+export async function createTrack(userId: string, fileName: string, filePath: string, title?: string, wasVideo = false) {
+	try {
+		const trackId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+		const newTrack: typeof table.track.$inferInsert = {
+			id: trackId,
+			userId,
+			filePath,
+			fileName,
+			title: title || null,
+			wasVideo,
+			createdAt: new Date()
+		};
+		const result = await db.insert(table.track).values(newTrack).returning();
+		const created = result[0];
+		console.log(`[user-service] createTrack succeeded: userId=${userId} trackId=${created.id} filePath=${filePath}`);
+		return created;
+	} catch (err) {
+		console.error('[user-service] createTrack failed:', err);
+		throw err;
+	}
+}
+
+export async function getTracksByUser(userId: string, limit = 50, offset = 0) {
+    return db.select().from(table.track).where(eq(table.track.userId, userId)).limit(limit).offset(offset);
+}
+
+export async function createTranscription(trackId: string, content: string, withTimestamps = false) {
+	try {
+		const transId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
+		const newTrans: typeof table.transcription.$inferInsert = {
+			id: transId,
+			trackId,
+			content,
+			withTimestamps,
+			createdAt: new Date()
+		};
+		const result = await db.insert(table.transcription).values(newTrans).returning();
+		const created = result[0];
+		console.log(`[user-service] createTranscription succeeded: trackId=${trackId} transcriptionId=${created.id} withTimestamps=${withTimestamps}`);
+		return created;
+	} catch (err) {
+		console.error('[user-service] createTranscription failed:', err);
+		throw err;
+	}
+}
+
+export async function getTranscriptionsByTrack(trackId: string) {
+    return db.select().from(table.transcription).where(eq(table.transcription.trackId, trackId));
+}
+
+export async function deleteTrack(trackId: string, ownerId: string) {
+    // ensure ownership
+    const track = (await db.select().from(table.track).where(eq(table.track.id, trackId)))[0];
+    if (!track) return false;
+    if (track.userId !== ownerId) return false;
+
+    // remove file
+    try {
+        const fullPath = path.join(STORAGE_DIR, track.filePath);
+        await fs.rm(fullPath).catch(() => {});
+    } catch {}
+
+    // delete transcriptions
+    await db.delete(table.transcription).where(eq(table.transcription.trackId, trackId));
+    // delete track
+    const res = await db.delete(table.track).where(eq(table.track.id, trackId));
+    return res.changes > 0;
+}
+
+// Delete only user data (tracks + transcriptions + files), keep user row
+export async function deleteUserData(userId: string) {
+    const tracks = await db.select().from(table.track).where(eq(table.track.userId, userId));
+    for (const t of tracks) {
+        try { await fs.rm(path.join(STORAGE_DIR, t.filePath)).catch(() => {}); } catch {}
+    }
+    await db.delete(table.transcription).where(eq(table.transcription.trackId, table.track.id)).where(eq(table.track.userId, userId)).run?.();
+    // simpler fallback: delete transcriptions where trackId in (select id from track where userId = ?)
+    await db.execute(`DELETE FROM transcription WHERE trackId IN (SELECT id FROM track WHERE userId = ?)`, [userId]);
+    await db.delete(table.track).where(eq(table.track.userId, userId));
+}
+
+// Update deleteUser to also remove files and related rows
 export async function deleteUser(id: string): Promise<boolean> {
     // First, delete all sessions for this user
     await db.delete(table.session).where(eq(table.session.userId, id));
+    
+    // delete tracks files and related transcriptions
+    const tracks = await db.select().from(table.track).where(eq(table.track.userId, id));
+    for (const t of tracks) {
+        try { await fs.rm(path.join(STORAGE_DIR, t.filePath)); } catch {}
+    }
+    await db.delete(table.transcription).where(eq(table.transcription.trackId, table.track.id)).where(eq(table.track.userId, id)).run?.();
+    await db.execute(`DELETE FROM transcription WHERE trackId IN (SELECT id FROM track WHERE userId = ?)`, [id]);
+    await db.delete(table.track).where(eq(table.track.userId, id));
     
     // Then delete the user
     const result = await db.delete(table.user).where(eq(table.user.id, id));

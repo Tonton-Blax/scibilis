@@ -4,6 +4,7 @@ import { sha256 } from '@oslojs/crypto/sha2';
 import { encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
 import { db } from '$lib/server/db';
 import * as table from '$lib/server/db/schema';
+import { deleteUserData, deleteUser } from '$lib/server/user-service';
 
 const DAY_IN_MS = 1000 * 60 * 60 * 24;
 
@@ -27,7 +28,12 @@ export async function createSession(token: string, userId: string) {
 }
 
 export async function validateSessionToken(token: string) {
+	// LOG: incoming token presence (do NOT log raw token in production)
+	console.log('[auth] validateSessionToken called. token present:', !!token);
+
 	const sessionId = encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
+	console.log('[auth] derived sessionId (sha256 hex):', sessionId);
+
 	const [result] = await db
 		.select({
 			// Adjust user table here to tweak returned data
@@ -37,7 +43,10 @@ export async function validateSessionToken(token: string) {
 				email: table.user.email,
 				name: table.user.name,
 				role: table.user.role,
-				isActive: table.user.isActive
+				isActive: table.user.isActive,
+				// include subscriber and lastSeen if present
+				subscriber: table.user.subscriber,
+				lastSeen: table.user.lastSeen
 			},
 			session: table.session
 		})
@@ -46,18 +55,22 @@ export async function validateSessionToken(token: string) {
 		.where(eq(table.session.id, sessionId));
 
 	if (!result) {
+		console.log('[auth] validateSessionToken: no session found for sessionId');
 		return { session: null, user: null };
 	}
 	const { session, user } = result;
+	console.log('[auth] validateSessionToken: session found id=', session.id, 'userId=', user.id);
 
 	const sessionExpired = Date.now() >= session.expiresAt.getTime();
 	if (sessionExpired) {
+		console.log('[auth] validateSessionToken: session expired for id=', session.id);
 		await db.delete(table.session).where(eq(table.session.id, session.id));
 		return { session: null, user: null };
 	}
 
 	const renewSession = Date.now() >= session.expiresAt.getTime() - DAY_IN_MS * 15;
 	if (renewSession) {
+		console.log('[auth] validateSessionToken: renewing session expiresAt for id=', session.id);
 		session.expiresAt = new Date(Date.now() + DAY_IN_MS * 30);
 		await db
 			.update(table.session)
@@ -65,6 +78,7 @@ export async function validateSessionToken(token: string) {
 			.where(eq(table.session.id, session.id));
 	}
 
+	console.log('[auth] validateSessionToken: success user=', user.id);
 	return { session, user };
 }
 

@@ -46,21 +46,81 @@
   
   async function processFile(file: File): Promise<AudioTrack> {
     const isAudio = file.type.startsWith('audio/');
+    // revert to local-only extraction logic
     const audioBlob = isAudio ? file : await extractAudio(file);
+
+    // LOG: audio extracted
+    try {
+      console.log(`[DropZone] extracted audio for ${file.name}. blob size=${(audioBlob as Blob).size}`);
+    } catch (e) {
+      console.warn('[DropZone] failed to log extracted audio info', e);
+    }
+
+    // Create object URL for playback
     const url = URL.createObjectURL(audioBlob);
-    
+
+    // Ensure ffmpeg UI state is cleared immediately after extraction so spinner doesn't stick
+    try {
+      ffmpegMessage.clear();
+    } catch {}
+
     // Set default title and artist from file name
     const title = file.name.replace(/\.[^/.]+$/, ""); // Remove file extension
     const artist = "Unknown Artist";
-    
-    return {
+
+    const track: AudioTrack = {
       id: crypto.randomUUID(),
       url,
       title,
       artist,
       originalFile: file,
-      wasVideo: !isAudio
+      wasVideo: !isAudio,
+      serverSaved: false
     };
+
+    // Try to persist to server if possible but tolerate 401/other failures
+    try {
+      const form = new FormData();
+      form.set('file', file, file.name);
+      form.set('title', title);
+
+      // send credentials so session cookie is included when available
+      const res = await fetch('/api/tracks', {
+        method: 'POST',
+        body: form,
+        credentials: 'same-origin'
+      });
+
+      // Log outcome for debugging
+      console.log('[DropZone] upload response status:', res.status);
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        console.log('[DropZone] upload response body:', data);
+        if (data && data.track && data.track.id) {
+          track.id = data.track.id;
+          track.serverSaved = true;
+        } else {
+          // server accepted but returned no id — keep local copy
+          toast.trigger('Upload accepted but server returned no id; kept locally', 'orange');
+        }
+      } else {
+        // handle common expected statuses gracefully
+        if (res.status === 401) {
+          console.warn('[DropZone] upload unauthorized (401) — keeping local-only track');
+          toast.trigger('Not authenticated — track saved locally only. Log in to persist it on the server.', 'orange');
+        } else {
+          const err = await res.json().catch(() => null);
+          console.warn('[DropZone] upload failed:', res.status, err);
+          toast.trigger('Upload to server failed: ' + (err?.error || res.statusText), 'orange');
+        }
+      }
+    } catch (e) {
+      console.error('[DropZone] upload error', e);
+      toast.trigger('Upload to server failed: ' + (e instanceof Error ? e.message : String(e)), 'orange');
+    }
+
+    return track;
   }
 
   async function processFilesSequentially(files: FileList) {
