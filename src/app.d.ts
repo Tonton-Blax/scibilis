@@ -11,7 +11,14 @@ declare global {
 		wasVideo: boolean;
 		serverSaved: boolean;
 		hasTranscription?: boolean;
-		transcriptionContent?: string;
+		transcriptionContent?: Transcription[] | null;
+	}
+
+	interface Transcription {
+		trackId: string;
+		content: string;
+		withTimestamps: boolean;
+		createdAt: string;
 	}
 
 	interface PendingFile {
