@@ -1,3 +1,4 @@
+import { getTranscriptionsByTrack } from '$lib/server/user-service';
 import type { PageServerLoad } from './$types';
 
 interface TrackStats {
@@ -42,7 +43,8 @@ export const load = (async ({ locals, fetch }) => {
 async function processTrack(
   track: any,
   messages: string[],
-  stats: TrackStats, fetch: typeof globalThis.fetch
+  stats: TrackStats, 
+  fetch: typeof globalThis.fetch
 ): Promise<AudioTrack | null> {
   const baseTrack = {
     id: track.id,
@@ -53,38 +55,43 @@ async function processTrack(
     serverSaved: true
   };
 
-  // For server-saved tracks, return the API URL that the client can access
-  // This avoids the blob:nodedata URL issue which is not accessible client-side
+  let audioUrl: string | null = null;
+  let transcriptionData: any = null;
+
+  // Check for audio
   if (track.filePath) {
-    stats.loaded++;
-    return {
-      ...baseTrack,
-      url: `/api/tracks/${track.id}`
-    };
+    audioUrl = `/api/tracks/${track.id}`;
   }
 
-  // Audio failed, try transcription
+  // Always try to get transcription
   try {
-    const transcriptionResponse = await fetch(`/api/transcriptions/${track.id}`);
-    
-    if (transcriptionResponse.ok) {
-      const transcription = await transcriptionResponse.json();
-      stats.transcriptionOnly++;
-      return {
-        ...baseTrack,
-        url: null,
-        hasTranscription: true,
-        transcriptionContent: transcription.content
-      };
-    }
+    transcriptionData = await getTranscriptionsByTrack(track.id);
+    console.log(`--TRANSCRIPTIOn Fetched transcription for track ${track.id}`, transcriptionData);
   } catch (error) {
     console.error(`Failed to fetch transcription for track ${track.id}:`, error);
   }
 
-  // Both failed, delete track
+  // If we have either audio or transcription, return the track
+  if (audioUrl || transcriptionData) {
+    if (audioUrl && transcriptionData) {
+      stats.loaded++; // Both audio and transcription
+    } else if (transcriptionData) {
+      stats.transcriptionOnly++; // Only transcription
+    } else {
+      stats.loaded++; // Only audio
+    }
+
+    return {
+      ...baseTrack,
+      url: audioUrl,
+      hasTranscription: !!transcriptionData,
+      transcriptionContent: transcriptionData
+    };
+  }
+
+  // Neither available, delete track
   return await deleteOrphanedTrack(track, messages, stats, fetch);
 }
-
 async function deleteOrphanedTrack(
   track: any, 
   messages: string[], 

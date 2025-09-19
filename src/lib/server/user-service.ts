@@ -162,7 +162,6 @@ export async function getTracksByUser(userId: string, limit = 50, offset = 0) {
 
 export async function createTranscription(trackId: string, content: string, withTimestamps = false) {
 	try {
-		console.log(`[user-service] createTranscription: trackId=${trackId} withTimestamps=${withTimestamps}`);
 		const transId = encodeBase32LowerCase(crypto.getRandomValues(new Uint8Array(15)));
 		const newTrans: typeof table.transcription.$inferInsert = {
 			id: transId,

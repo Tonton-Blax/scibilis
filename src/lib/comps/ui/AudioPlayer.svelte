@@ -5,6 +5,9 @@
 	let duration = $state(0);
 	let paused = $state(true);
 	let audioError = $state(false);
+	let isSeeking = $state(false);
+	let audioReady = $state(false);
+	let isLoading = $state(true);
 
 	function format(time: number): string {
 		if (isNaN(time)) return '...';
@@ -20,9 +23,91 @@
 		audioError = true;
 		console.error('Audio playback failed:', src);
 	}
+
+	// Handle audio loaded metadata
+	function handleLoadedMetadata() {
+		isLoading = false;
+		audioReady = true;
+		console.log('[AudioPlayer] Audio metadata loaded, duration:', duration);
+	}
+
+	// Handle audio canplay event
+	function handleCanPlay() {
+		isLoading = false;
+		audioReady = true;
+		console.log('[AudioPlayer] Audio can play, ready for seeking');
+	}
+
+	// Handle audio waiting event
+	function handleWaiting() {
+		isLoading = true;
+		console.log('[AudioPlayer] Audio waiting for data');
+	}
+
+	// Handle audio playing event
+	function handlePlaying() {
+		isLoading = false;
+		console.log('[AudioPlayer] Audio started playing');
+	}
+
+	// Handle audio stalled event
+	function handleStalled() {
+		isLoading = true;
+		console.warn('[AudioPlayer] Audio playback stalled');
+	}
+
+	// Safe seek function that waits for audio to be ready
+	async function safeSeek(targetTime: number) {
+		// Validate target time
+		if (isNaN(targetTime) || targetTime < 0) {
+			console.warn('[AudioPlayer] Invalid seek time:', targetTime);
+			return;
+		}
+
+		if (!audioReady) {
+			console.log('[AudioPlayer] Audio not ready, waiting...');
+			// Wait for audio to load with a timeout
+			const timeoutPromise = new Promise((_, reject) =>
+				setTimeout(() => reject(new Error('Audio load timeout')), 2000)
+			);
+			
+			try {
+				await Promise.race([
+					new Promise(resolve => {
+						// Check periodically if audio is ready
+						const checkInterval = setInterval(() => {
+							if (audioReady) {
+								clearInterval(checkInterval);
+								resolve(true);
+							}
+						}, 50);
+						
+						// Also resolve if duration is available (audio is loading)
+						if (duration > 0) {
+							clearInterval(checkInterval);
+							resolve(true);
+						}
+					}),
+					timeoutPromise
+				]);
+			} catch (error) {
+				console.warn('[AudioPlayer] Audio load timeout, attempting seek anyway:', error);
+			}
+		}
+		
+		try {
+			// Ensure target time doesn't exceed duration
+			const clampedTime = Math.min(targetTime, duration || 0);
+			time = clampedTime;
+			console.log('[AudioPlayer] Seeking to:', clampedTime, 'of', duration);
+		} catch (error) {
+			console.error('[AudioPlayer] Seek error:', error);
+			audioError = true;
+		}
+	}
 </script>
 
-<div class={['player', 'rounded-lg', { paused, 'audio-error': audioError }]}>
+<div class={['player', 'rounded-lg', { paused, 'audio-error': audioError, 'loading': isLoading }]}>
 	<audio
 		{src}
 		bind:currentTime={time}
@@ -32,6 +117,15 @@
 			time = 0;
 		}}
 		onerror={handleAudioError}
+		onloadedmetadata={handleLoadedMetadata}
+		oncanplay={handleCanPlay}
+		onwaiting={handleWaiting}
+		onplaying={handlePlaying}
+		onstalled={handleStalled}
+		onemptied={() => {
+			isLoading = true;
+			audioReady = false;
+		}}
 	></audio>
 
 	<button
@@ -57,6 +151,7 @@
 					class="slider"
 					onpointerdown={e => {
 						const div = e.currentTarget;
+						isSeeking = true;
 
 						function seek(e: PointerEvent) {
 							const { left, width } = div.getBoundingClientRect();
@@ -65,7 +160,8 @@
 							if (p < 0) p = 0;
 							if (p > 1) p = 1;
 
-							time = p * duration;
+							const targetTime = p * duration;
+							safeSeek(targetTime);
 						}
 
 						seek(e);
@@ -74,12 +170,13 @@
 
 						window.addEventListener('pointerup', () => {
 							window.removeEventListener('pointermove', seek);
+							isSeeking = false;
 						}, {
 							once: true
 						});
 					}}
 				>
-					<div class="progress" style="--progress: {time / duration}%"></div>
+					<div class="progress" style="--progress: {isSeeking ? (time / duration) * 100 : time / duration}%"></div>
 				</div>
 				<span>{duration ? format(duration) : '--:--'}</span>
 			</div>
@@ -110,6 +207,15 @@
 	.player.audio-error {
 		background: var(--color-red-500);
 		color: var(--color-gray-100);
+	}
+
+	.player.loading {
+		opacity: 0.7;
+		pointer-events: none;
+	}
+
+	.player.loading .play {
+		opacity: 0.5;
 	}
 
 	button {

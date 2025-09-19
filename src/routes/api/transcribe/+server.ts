@@ -29,7 +29,7 @@ export async function POST({ request, url, locals }) {
     const { audioData, trackId: clientTrackId } = validatedData;
 
     const auth = await optionalAuth(locals);
-    const userId = auth?.user?.id ?? null;
+    const userId = auth?.id ?? null;
 
     if (!MISTRAL_API_KEY) {
       return json({ success: false, trackId: clientTrackId, timestamp: new Date().toISOString(), error: "Mistral API key not configured" }, { status: 500 });
@@ -39,27 +39,38 @@ export async function POST({ request, url, locals }) {
     const arrayBuffer = new Uint8Array(audioData.arrayBuffer).buffer;
     await fs.mkdir(STORAGE_DIR, { recursive: true });
 
+    // Use the existing track ID for file storage and database operations
+    const trackId = clientTrackId || crypto.randomUUID();
     const ownerDir = userId ? `user-${userId}` : 'anonymous';
-    const trackFolder = path.join('tracks', ownerDir);
+    const trackFolder = path.join('tracks', ownerDir, trackId);
     const absFolder = path.join(STORAGE_DIR, trackFolder);
     await fs.mkdir(absFolder, { recursive: true });
 
-    const serverFileName = `${clientTrackId || crypto.randomUUID()}-${Date.now()}-${audioData.name}`;
+    const serverFileName = `${Date.now()}-${audioData.name}`;
     const relPath = path.join(trackFolder, serverFileName);
     const absPath = path.join(STORAGE_DIR, relPath);
-
-    console.log(`[api/transcribe] saving incoming audio to ${absPath} for user=${userId || 'anonymous'}`);
 
     await fs.writeFile(absPath, new Uint8Array(arrayBuffer));
 
     let dbTrack = null;
     if (userId) {
       try {
-        dbTrack = await createTrack(userId, audioData.name, relPath, undefined, audioData.type.startsWith('video/'));
-        console.log(`[api/transcribe] created DB track id=${dbTrack?.id} for user=${userId}`);
+        // Only create track if it doesn't exist (using clientTrackId)
+        if (clientTrackId) {
+          console.log(`[api/transcribe] using existing track id=${clientTrackId} for user=${userId}`);
+          // For now, assume the track exists since it was created in the tracks endpoint
+          // In a real implementation, you might want to verify the track exists
+          dbTrack = { id: clientTrackId, userId, fileName: audioData.name, filePath: relPath };
+        } else {
+          dbTrack = await createTrack(userId, audioData.name, relPath, undefined, audioData.type.startsWith('video/'));
+          console.log(`[api/transcribe] created DB track id=${dbTrack?.id} for user=${userId}`);
+        }
       } catch (dbErr) {
         console.error('[api/transcribe] createTrack failed:', dbErr);
       }
+    } else if (clientTrackId) {
+      // For anonymous users with clientTrackId, we still need to save the transcription
+      console.log(`[api/transcribe] anonymous user with clientTrackId=${clientTrackId}, saving transcription only`);
     }
 
     // Send to Mistral
@@ -84,15 +95,20 @@ export async function POST({ request, url, locals }) {
       }, { status: 500 });
     }
 
-    // After transcription success, persist transcription if we have dbTrack
-    if (dbTrack) {
+    // After transcription success, persist transcription using the track ID
+    const trackIdForTranscription = dbTrack?.id || clientTrackId;
+    console.log(`[api/transcribe] trackIdForTranscription: ${trackIdForTranscription}, dbTrack: ${dbTrack?.id}, clientTrackId: ${clientTrackId}`);
+    
+    if (trackIdForTranscription) {
       try {
         const content = withTimestamps ? JSON.stringify(transcriptionResponse) : transcriptionResponse.text;
-        const saved = await createTranscription(dbTrack.id, content, !!withTimestamps);
-        console.log(`[api/transcribe] saved transcription id=${saved?.id} for track=${dbTrack.id}`);
+        const saved = await createTranscription(trackIdForTranscription, content, !!withTimestamps);
+        console.log(`[api/transcribe] saved transcription id=${saved?.id} for track=${trackIdForTranscription}`);
       } catch (err) {
         console.error('[api/transcribe] createTranscription failed:', err);
       }
+    } else {
+      console.warn('[api/transcribe] no track ID available for transcription saving');
     }
 
     const result = {

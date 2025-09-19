@@ -245,7 +245,7 @@
             name: `audio-${trackId}.mp3`,
             type: 'audio/mpeg',
             arrayBuffer: array
-          },
+          },  
           trackId
         })
       });
