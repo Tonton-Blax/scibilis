@@ -84,7 +84,6 @@ async function processTrack(
     return {
       ...baseTrack,
       url: audioUrl,
-      hasTranscription: !!transcriptionData,
       transcriptionContent: transcriptionData
     };
   }

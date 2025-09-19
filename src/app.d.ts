@@ -10,7 +10,6 @@ declare global {
 		originalFile: File;
 		wasVideo: boolean;
 		serverSaved: boolean;
-		hasTranscription?: boolean;
 		transcriptionContent?: Transcription[] | null;
 	}
 

@@ -1,19 +1,20 @@
 <script lang="ts">
-  import { Dropzone, Button, Spinner, Toast, Dropdown, DropdownItem, Modal, Input, Tooltip, Clipboard, Indicator } from "flowbite-svelte";
+  import { Dropzone, Button, Spinner, Toast, Dropdown, DropdownItem, Modal, Input, Tooltip, Clipboard, Indicator, P } from "flowbite-svelte";
   import { extractAudio } from "$lib/processors/extractAudio";
 	import { ffmpegMessage, toast } from "$lib/states.svelte";
 	import AudioPlayer from "./AudioPlayer.svelte";
 	import { CloseCircleOutline, PenNibOutline, VideoCameraSolid, ExclamationCircleSolid, DownloadOutline, ChevronDownOutline, NewspaperOutline, CheckOutline, ClipboardCleanSolid } from "flowbite-svelte-icons";
 	import { slide } from "svelte/transition";
+	import { marked } from "marked";
   let filesInDropzone = <FileList | null>$state(null);
   let pendingFiles = $state<PendingFile[]>([]);
+  
     
   let transcribingTracks = $state<Set<string>>(new Set());
-  let transcriptionResults = $state<Map<string, TranscriptionResult>>(new Map());
   
   // Modal state for viewing transcriptions
   let showTranscriptionModal = $state(false);
-  let currentTranscription = $state<TranscriptionResult | null>(null);
+  let currentTranscription = $state<{ trackId: string; title: string; content: string; timestamp: string } | null>(null);
   
   let { audioTracks = [], messages }: { audioTracks: AudioTrack[]; messages: string[] } = $props();
 
@@ -179,10 +180,6 @@
     // Also remove any transcription results for this file
     const audioTrack = audioTracks.find(track => track.originalFile === fileToRemove?.file);
     if (audioTrack) {
-      const newResults = new Map(transcriptionResults);
-      newResults.delete(audioTrack.id);
-      transcriptionResults = newResults;
-      
       const newTranscribing = new Set(transcribingTracks);
       newTranscribing.delete(audioTrack.id);
       transcribingTracks = newTranscribing;
@@ -219,7 +216,6 @@
     audioTracks = [];
     pendingFiles = [];
     transcribingTracks = new Set();
-    transcriptionResults = new Map();
     filesInDropzone = null;
     ffmpegMessage.clear();
   }
@@ -256,14 +252,23 @@
       const result = await response.json();
       
       if (result.success && 'content' in result && result.content) {
-        // Store the transcription result
-        transcriptionResults = new Map(transcriptionResults).set(trackId, {
-          trackId,
-          content: withTimestamps ? //@ts-ignore
-            result.content.segments?.map(s =>`[${s.start}-${s.end}]\r\n${s.text}`).join('\r\n') + '\r\n\r\n' + `Original Text:\r\n\r\n${result.content.text}`
-            : result.content,
-          timestamp: result.timestamp
-        });
+        // Store the transcription result directly in the track
+        const trackIndex = audioTracks.findIndex(t => t.id === trackId);
+        if (trackIndex !== -1) {
+          const updatedTracks = [...audioTracks];
+          updatedTracks[trackIndex] = {
+            ...updatedTracks[trackIndex],
+            transcriptionContent: [{
+              trackId,
+              content: withTimestamps ? //@ts-ignore
+                result.content.segments?.map(s =>`[${s.start}-${s.end}]\r\n${s.text}`).join('\r\n') + '\r\n\r\n' + `Original Text:\r\n\r\n${result.content.text}`
+                : result.content,
+              withTimestamps,
+              createdAt: new Date().toISOString()
+            }]
+          };
+          audioTracks = updatedTracks;
+        }
         
         toast.trigger("Transcription completed successfully!", "green");
       } else {
@@ -281,11 +286,14 @@
   }
   
   function downloadTranscription(trackId: string) {
-    const result = transcriptionResults.get(trackId);
-    if (!result) return;
+    const track = audioTracks.find(t => t.id === trackId);
+    if (!track || !track.transcriptionContent || track.transcriptionContent.length === 0) return;
+    
+    // Use the first transcription (or combine all)
+    const transcription = track.transcriptionContent[0];
     
     // Create a blob with the transcription content
-    const blob = new Blob([result.content], { type: 'text/plain' });
+    const blob = new Blob([transcription.content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     
     // Create a temporary link to download the file
@@ -322,9 +330,14 @@
   }
   
   function viewTranscription(trackId: string) {
-    const result = transcriptionResults.get(trackId);
-    if (result) {
-      currentTranscription = result;
+    const track = audioTracks.find(t => t.id === trackId);
+    if (track && track.transcriptionContent && track.transcriptionContent.length > 0) {
+      currentTranscription = {
+        trackId,
+        title: track.title,
+        content: track.transcriptionContent[0].content,
+        timestamp: track.transcriptionContent[0].createdAt
+      };
       showTranscriptionModal = true;
     }
   }
@@ -401,7 +414,7 @@
     {#each audioTracks as track (track.id)}
       <div class="mb-2 flex flex-row gap-x-2 items-center justify-start">
 
-        {#if transcribingTracks.has(track.id) &&  !transcriptionResults.has(track.id)}
+        {#if transcribingTracks.has(track.id)}
           <Button color="primary" class="h-[3.75rem] cursor-pointer w-[24rem]" disabled>
             <Spinner class="h-6 w-6 mr-2" />
             Transcription en cours...
@@ -412,7 +425,7 @@
             title={track.title}
             artist={track.artist}
           />
-        {:else if track.hasTranscription}
+        {:else if track.transcriptionContent && track.transcriptionContent.length > 0}
           <!-- Placeholder for tracks with transcription but missing audio -->
           <div class="flex items-center gap-x-2 bg-gray-100 dark:bg-gray-800 p-3 rounded-lg flex-1 w-[24rem] h-[3.75rem]">
             <ExclamationCircleSolid class="h-6 w-6 text-yellow-500" />
@@ -433,7 +446,7 @@
         {/if}
 
         <Button  color="green" class="h-[3.75rem] cursor-pointer relative">
-          {#if transcriptionResults.has(track.id)}
+          {#if track.transcriptionContent && track.transcriptionContent.length > 0}
            <span class="sr-only">Notifications</span>
           <Indicator color="green" border size="xl" placement="top-right" class="text-xs font-bold babouin">✓</Indicator>
           {/if}
@@ -467,7 +480,7 @@
             <span>Transcrire avec Timecodes</span>
           </DropdownItem>
           <DropdownItem
-            disabled={!transcriptionResults.has(track.id)}
+            disabled={!track.transcriptionContent || track.transcriptionContent.length === 0}
             class="flex flex-row space-x-2 items-center w-full mx-auto cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             onclick={() => downloadTranscription(track.id)}
           >
@@ -475,7 +488,7 @@
             <span>Télécharger la transcription</span>
           </DropdownItem>
           <DropdownItem
-            disabled={!transcriptionResults.has(track.id)}
+            disabled={!track.transcriptionContent || track.transcriptionContent.length === 0}
             class="flex flex-row space-x-2 items-center w-full mx-auto cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             onclick={() => viewTranscription(track.id)}
           >
@@ -510,10 +523,6 @@
             audioTracks = audioTracks.filter(t => t.id !== track.id);
             
             // Also remove any transcription results for this track
-            const newResults = new Map(transcriptionResults);
-            newResults.delete(track.id);
-            transcriptionResults = newResults;
-            
             const newTranscribing = new Set(transcribingTracks);
             newTranscribing.delete(track.id);
             transcribingTracks = newTranscribing;
@@ -543,52 +552,27 @@
 
 <!-- Transcription Modal -->
 {#if currentTranscription}
-  <Modal form bind:open={showTranscriptionModal} size="xl" transition={slide} permanent>
-    <div class="p-6">
-      <div class="flex justify-between items-center mb-4">
+  <Modal form bind:open={showTranscriptionModal} size="xl" transition={slide}>
+      
+    
+    {#snippet header()}
+
+      <div class="flex justify-between items-center">
         <h3 class="text-xl font-semibold text-gray-900 dark:text-white">
-          Transcription
+          Transcription: {currentTranscription?.title}
         </h3>
-        <Button
-          color="alternative"
-          onclick={() => showTranscriptionModal = false}
-          class="p-2"
-        >
-          <CloseCircleOutline class="h-5 w-5" />
-        </Button>
-      </div>
-      
-      <div class="mb-4">
-        <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">
-          Created: {new Date(currentTranscription.timestamp).toLocaleString()}
-        </p>
         
-        <!-- Transcription content with clipboard functionality -->
-        <div class="relative">
-          <textarea
-            bind:value={currentTranscription.content}
-            readonly
-            rows={10}
-            class="w-full p-2.5 text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
-          ></textarea>
-          <div class="absolute top-2 right-2">
-            <Clipboard bind:value={currentTranscription.content} embedded>
-              {#snippet children(success)}
-                <Tooltip isOpen={success}>
-                  {success ? "Copied" : "Copy to clipboard"}
-                </Tooltip>
-                {#if success}
-                  <CheckOutline class="h-5 w-5" />
-                {:else}
-                  <ClipboardCleanSolid class="h-5 w-5" />
-                {/if}
-              {/snippet}
-            </Clipboard>
-          </div>
-        </div>
       </div>
-      
+      {/snippet}
+
+      <div>        
+          <P class="w-full p-2.5 text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+        {@html marked(currentTranscription.content)}
+        </P>
+      </div>
+      {#snippet footer()}
       <div class="flex justify-end space-x-2">
+        
         <Button
           color="alternative"
           onclick={() => showTranscriptionModal = false}
@@ -606,8 +590,22 @@
           <DownloadOutline class="mr-2 h-5 w-5" />
           Download
         </Button>
+        {#if currentTranscription?.content}
+        <Clipboard bind:value={currentTranscription.content} class="!bg-gray-500">
+          {#snippet children(success)}
+            <Tooltip isOpen={success}>
+              {success ? "Copied" : "Copy to clipboard"}
+            </Tooltip>
+            {#if success}
+              <CheckOutline class="h-5 w-5" />
+            {:else}
+              <ClipboardCleanSolid class="h-5 w-5" />
+            {/if}
+          {/snippet}
+        </Clipboard>
+        {/if}
       </div>
-    </div>
+      {/snippet}
   </Modal>
 {/if}
 

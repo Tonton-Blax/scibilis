@@ -43,3 +43,7 @@
 .sidebar > div {
 	border-radius: 1rem !important;
 }
+
+button {
+	cursor: pointer;
+}
