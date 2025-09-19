@@ -9,16 +9,13 @@
   let filesInDropzone = <FileList | null>$state(null);
   let pendingFiles = $state<PendingFile[]>([]);
   
-    
+
   let transcribingTracks = $state<Set<string>>(new Set());
   
-  // Modal state for viewing transcriptions
   let showTranscriptionModal = $state(false);
   let currentTranscription = $state<{ trackId: string; title: string; content: string; timestamp: string } | null>(null);
   
   let { audioTracks = [], messages }: { audioTracks: AudioTrack[]; messages: string[] } = $props();
-
-  $effect(()=>console.log(audioTracks));
 
   async function processFile(file: File): Promise<AudioTrack> {
     const isAudio = file.type.startsWith('audio/');
@@ -58,32 +55,24 @@
         credentials: 'same-origin'
       });
 
-      // Log outcome for debugging
-      console.log('[DropZone] upload response status:', res.status);
 
       if (res.ok) {
         const data = await res.json().catch(() => null);
-        console.log('[DropZone] upload response body:', data);
         if (data && data.track && data.track.id) {
           track.id = data.track.id;
           track.serverSaved = true;
         } else {
-          // server accepted but returned no id — keep local copy
           toast.trigger('Upload accepted but server returned no id; kept locally', 'orange');
         }
       } else {
-        // handle common expected statuses gracefully
         if (res.status === 401) {
-          console.warn('[DropZone] upload unauthorized (401) — keeping local-only track');
           toast.trigger('Not authenticated — track saved locally only. Log in to persist it on the server.', 'orange');
         } else {
           const err = await res.json().catch(() => null);
-          console.warn('[DropZone] upload failed:', res.status, err);
           toast.trigger('Upload to server failed: ' + (err?.error || res.statusText), 'orange');
         }
       }
     } catch (e) {
-      console.error('[DropZone] upload error', e);
       toast.trigger('Upload to server failed: ' + (e instanceof Error ? e.message : String(e)), 'orange');
     }
 
@@ -352,18 +341,14 @@
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
-          console.log(`[DropZone] Track ${trackId} deleted from database`);
           return true;
         } else {
-          console.error(`[DropZone] Failed to delete track ${trackId}:`, data.error);
           return false;
         }
       } else {
-        console.error(`[DropZone] Failed to delete track ${trackId}:`, response.status, response.statusText);
         return false;
       }
     } catch (error) {
-      console.error(`[DropZone] Error deleting track ${trackId}:`, error);
       return false;
     }
   }
